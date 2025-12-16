@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GPU Stock Performance Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+
+<h2>GPU Stock Performance Dashboard</h2>
+<p class="subtitle">
+Interactive exploration of AMD, Intel, and NVIDIA before and during the AI era
+</p>
+<i>Poj Netsiri 12402153</i><br><br>
+<div class="grid">
+
+<div class="panel full panel-overview">
+  <h3>1. Overview: Stock Prices (Brush to Select Period)</h3>
+
+  <div class="overview-wrap">
+    <svg id="overview"></svg>
+
+    <div class="overview-controls">
+      <div class="controls-title">Show / hide lines</div>
+
+      <div class="checkbox-group">
+        <label><input type="checkbox" id="o-amd" checked> AMD</label>
+        <label><input type="checkbox" id="o-intel" checked> INTEL</label>
+        <label><input type="checkbox" id="o-nvidia" checked> NVIDIA</label>
+      </div>
+
+      <button id="o-refresh" type="button">Refresh</button>
+      <div id="o-warning" class="warning"></div>
+    </div>
+  </div>
+</div>
+
+
+  <div class="panel full">
+    <h3>2. Detail View (Linked to Selection in Panel 1)</h3>
+    <svg id="detail"></svg>
+  </div>
+
+<div class="panel full panel-model">
+  <h3>3. Data Modelling from 2016 (interactive)</h3>
+
+  <div class="model-wrap">
+    <svg id="modelPlot"></svg>
+
+    <div class="model-controls">
+      <div class="controls-title">Show / hide lines</div>
+
+      <label><input type="checkbox" id="m-amd" checked> AMD</label><br>
+      <label><input type="checkbox" id="m-intel" checked> INTEL</label><br>
+      <label><input type="checkbox" id="m-nvidia" checked> NVIDIA</label>
+
+      <button id="m-refresh" type="button">Refresh</button>
+      <div id="m-warning" class="warning"></div>
+    </div>
+  </div>
+</div>
+
+
+<div class="panel full panel-scatter">
+  <h3>4. Correlation between stock prices (interactive)</h3>
+
+  <div class="scatter-wrap">
+    <svg id="scatter"></svg>
+
+    <div class="scatter-controls">
+      <div class="controls-title">Select exactly<br> 2 stocks</div>
+
+      <label><input type="checkbox" id="cb-amd" checked> AMD</label>
+      <label><input type="checkbox" id="cb-intel"> INTEL</label>
+      <label><input type="checkbox" id="cb-nvidia" checked> NVIDIA</label>
+
+      <button id="btn-refresh" type="button">Refresh</button>
+
+      <div id="pair-warning" class="warning"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script src="main.js"></script>
+</body>
+</html>
