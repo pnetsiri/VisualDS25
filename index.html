@@ -8,31 +8,22 @@
 </head>
 <body>
 
-<h2>GPU Stock Performance Dashboard</h2>
+<h2>GPU Company Stock Performance Dashboard</h2>
 <p class="subtitle">
-Interactive exploration of AMD, Intel, and NVIDIA before and during the AI era
+Interactive exploration of AMD, Intel, and NVIDIA
 </p>
 <i>Poj Netsiri 12402153</i><br><br>
 <div class="grid">
 
-<div class="panel full panel-overview">
-  <h3>1. Overview: Stock Prices (Brush to Select Period)</h3>
+<div class="panel full">
+  <h3>1. NVIDIA Stock Price Splits (Brush to Select Period)</h3>
+  <h4>Blue dashed lines indicate stock split dates.</h4>
+  <h5>Brush around these lines reveals a sharp price drop and a corresponding surge in trading volume in Panel 2.</h5>
 
   <div class="overview-wrap">
     <svg id="overview"></svg>
 
-    <div class="overview-controls">
-      <div class="controls-title">Show / hide lines</div>
 
-      <div class="checkbox-group">
-        <label><input type="checkbox" id="o-amd" checked> AMD</label>
-        <label><input type="checkbox" id="o-intel" checked> INTEL</label>
-        <label><input type="checkbox" id="o-nvidia" checked> NVIDIA</label>
-      </div>
-
-      <button id="o-refresh" type="button">Refresh</button>
-      <div id="o-warning" class="warning"></div>
-    </div>
   </div>
 </div>
 
@@ -43,7 +34,11 @@ Interactive exploration of AMD, Intel, and NVIDIA before and during the AI era
   </div>
 
 <div class="panel full panel-model">
-  <h3>3. Data Modelling from 2016 (interactive)</h3>
+  <h3>3. Regression Modelling from 2016</h3>
+  <h4>NVIDIA shows the strongest and most stable modeled growth, 
+    AMD exhibits moderate but more volatile growth, while Intel 
+    demonstrates comparatively weak performance during the AI period (post-2016).</h4>
+  <h5>Select the stocks and click Refresh to apply the filter.</h5>
 
   <div class="model-wrap">
     <svg id="modelPlot"></svg>
@@ -63,8 +58,9 @@ Interactive exploration of AMD, Intel, and NVIDIA before and during the AI era
 
 
 <div class="panel full panel-scatter">
-  <h3>4. Correlation between stock prices (interactive)</h3>
-
+  <h3>4. Correlation between adjusted stock prices</h3>
+  <h4>NVIDIA and AMD exhibit a very strong positive correlation correlation (<i>r</i> = 0.918)</h4>
+ <h5>Select 2 stocks and click Refresh to apply the filter.</h5>
   <div class="scatter-wrap">
     <svg id="scatter"></svg>
 

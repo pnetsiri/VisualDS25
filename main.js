@@ -1,8 +1,14 @@
 const colors = {
-  AMD: "#1f77b4",
-  INTEL: "#2ca02c",
-  NVIDIA: "#d62728"
+  AMD: "#CC79A7",
+  INTEL: "#0072B2",
+  NVIDIA: "#D55E00"
 };
+
+const NVIDIA_SPLITS = [
+  new Date("2002-07-31"),
+  new Date("2004-08-06"),
+  new Date("2008-07-03")
+];
 
 let selectedPair = ["AMD", "NVIDIA"];   // Panel 4 (scatter) pair
 let currentDomain = null;
@@ -34,10 +40,16 @@ function linearFit(xs, ys) {
   return { slope, intercept };
 }
 
+function rSquared(actuals, fits) {
+  const meanA = d3.mean(actuals);
+  const ssTot = d3.sum(actuals, a => (a - meanA) ** 2);
+  const ssRes = d3.sum(actuals.map((a, i) => (a - fits[i]) ** 2));
+  return (ssTot === 0) ? NaN : (1 - ssRes / ssTot);
+}
+
 const margin = { top: 26, right: 20, bottom: 46, left: 60 };
 const width = 900;
 const height = 250;
-
 const parseDate = d3.isoParse;
 
 function addLegend(svg, tickers, xPos, yPos) {
@@ -62,170 +74,296 @@ function addLegend(svg, tickers, xPos, yPos) {
 }
 
 Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel]) => {
+
+  // =========================
+  // DATA (Panel 1/2 + Scatter)
+  // date,ticker,close,adj_close,volume
+  // =========================
   const data = raw.map(d => ({
     date: parseDate(d.date),
     ticker: d.ticker,
-    price: +d.price
-  })).filter(d => d.date instanceof Date && !isNaN(d.date) && !isNaN(d.price));
+    close: +d.close,
+    adj: +d.adj_close,
+    volume: +d.volume
+  })).filter(d =>
+    d.date instanceof Date &&
+    !isNaN(d.date) &&
+    d.ticker &&
+    !isNaN(d.close) &&
+    !isNaN(d.adj) // keep adj for detail/scatter
+  );
 
-  const byTicker = d3.group(data, d => d.ticker);
-  const tickers = ["AMD", "INTEL", "NVIDIA"]; // enforce order
+  const nvidiaData = data
+    .filter(d => d.ticker === "NVIDIA")
+    .sort((a, b) => a.date - b.date);
 
-  // Panel 1 -> Panel 2 visibility selection
-  let visibleTickers = ["AMD", "INTEL", "NVIDIA"];
+  // ---------- X scale (full data range) ----------
+// NVIDIA-specific time domain
+const x = d3.scaleTime()
+  .domain(d3.extent(nvidiaData, d => d.date))
+  .range([margin.left, width - margin.right]);
 
-  // ---------- SCALES ----------
-  const x = d3.scaleTime()
-    .domain(d3.extent(data, d => d.date))
-    .range([margin.left, width - margin.right]);
-
-  const y = d3.scaleLinear()
-    .domain(d3.extent(data, d => d.price))
-    .nice()
-    .range([height - margin.bottom, margin.top]);
 
   currentDomain = x.domain();
 
-  const line = d3.line()
-    .x(d => x(d.date))
-    .y(d => y(d.price));
-
   // =========================
-  // 1) OVERVIEW PANEL + CONTROLS (Panel 1)
+  // 1) OVERVIEW PANEL — NVIDIA CLOSE + VOLUME + SPLITS + BRUSH
   // =========================
   const overview = d3.select("#overview")
     .attr("viewBox", `0 0 ${width} ${height}`);
 
-  // Brush (define once, used inside drawOverview)
-  const brush = d3.brushX()
-    .extent([[margin.left, margin.top], [width - margin.right, height - margin.bottom]])
-    .on("brush end", brushed);
+  overview.append("text")
+    .attr("x", width / 2)
+    .attr("y", 16)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 12)
+    .attr("font-weight", "600")
+    .text("NVIDIA Close Price & Volume");
 
-  function drawOverview() {
-    overview.selectAll("*").remove();
+  // Price scale (left) — RAW CLOSE
+  const yPrice = d3.scaleLinear()
+    .domain(d3.extent(nvidiaData, d => d.close))
+    .nice()
+    .range([height - margin.bottom, margin.top]);
 
-    // Title inside SVG
-    overview.append("text")
-      .attr("x", width / 2)
-      .attr("y", 16)
-      .attr("text-anchor", "middle")
-      .attr("font-size", 12)
-      .attr("font-weight", "600")
-      .text("Stock Prices Over Time (Brush to Select Period)");
+  // Volume scale (right)
+  const hasVolume = nvidiaData.some(d => !isNaN(d.volume));
+  const yVolume = d3.scaleLinear()
+    .domain(hasVolume ? d3.extent(nvidiaData.filter(d => !isNaN(d.volume)), d => d.volume) : [0, 1])
+    .nice()
+    .range([height - margin.bottom, height / 2]);
 
-    // Axes
+  overview.append("g")
+    .attr("transform", `translate(0,${height - margin.bottom})`)
+    .call(d3.axisBottom(x));
+
+  overview.append("g")
+    .attr("transform", `translate(${margin.left},0)`)
+    .call(d3.axisLeft(yPrice));
+
+overview.append("g")
+  .attr("transform", `translate(${width - margin.right},0)`)
+  .call(
+    d3.axisRight(yVolume)
+      .ticks(3) // fewer labels = less clutter
+      .tickFormat(d3.format(".2s")) // 200M, 1B, etc.
+  );
+
+
+  // Axis labels
+  overview.append("text")
+    .attr("x", width / 2)
+    .attr("y", height - 8)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .text("Year");
+
+  overview.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -height / 2)
+    .attr("y", 15)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .text("Close Price (USD)");
+
+  overview.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -height / 2)
+    .attr("y", width + 24)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .text("Volume");
+
+
+  // Volume bars
+  if (hasVolume) {
+    const barW = Math.max(
+      1,
+      (x(nvidiaData[Math.min(1, nvidiaData.length - 1)].date) - x(nvidiaData[0].date)) * 0.9
+    );
+
     overview.append("g")
-      .attr("transform", `translate(0,${height - margin.bottom})`)
-      .call(d3.axisBottom(x));
+      .selectAll("rect")
+      .data(nvidiaData.filter(d => !isNaN(d.volume)))
+      .enter()
+      .append("rect")
+      .attr("x", d => x(d.date) - barW / 2)
+      .attr("y", d => yVolume(d.volume))
+      .attr("width", barW)
+      .attr("height", d => height - margin.bottom - yVolume(d.volume))
+      .attr("fill", "#bbb")
+      .attr("opacity", 0.55);
+  }
 
-    overview.append("g")
-      .attr("transform", `translate(${margin.left},0)`)
-      .call(d3.axisLeft(y));
+    // Price line
+  overview.append("path")
+    .datum(nvidiaData)
+    .attr("fill", "none")
+    .attr("stroke", colors.NVIDIA)
+    .attr("stroke-width", 2)
+    .attr("d", d3.line()
+      .x(d => x(d.date))
+      .y(d => yPrice(d.close))
+    );
 
-    // Axis labels
-    overview.append("text")
-      .attr("x", width / 2)
-      .attr("y", height - 8)
-      .attr("text-anchor", "middle")
-      .attr("font-size", 11)
-      .text("Year");
-
-    overview.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("x", -height / 2)
-      .attr("y", 15)
-      .attr("text-anchor", "middle")
-      .attr("font-size", 11)
-      .text("Adjusted Close Price (USD)");
-
-    // Lines (ONLY visibleTickers)
-    visibleTickers.forEach(t => {
-      overview.append("path")
-        .datum(byTicker.get(t))
-        .attr("fill", "none")
-        .attr("stroke", colors[t] || "#444")
+  // Split lines (blue dashed)
+  NVIDIA_SPLITS.forEach(sd => {
+    const [xmin, xmax] = x.domain();
+    if (sd >= xmin && sd <= xmax) {
+      overview.append("line")
+        .attr("x1", x(sd))
+        .attr("x2", x(sd))
+        .attr("y1", margin.top)
+        .attr("y2", height - margin.bottom)
+        .attr("stroke", "blue")
+        .attr("stroke-dasharray", "4,4")
         .attr("stroke-width", 1.5)
-        .attr("opacity", 0.7)
-        .attr("d", line);
-    });
-
-    // Legend (ONLY visibleTickers)
-    addLegend(overview, visibleTickers, width - 150, margin.top + 8);
-
-    // Re-attach brush after redraw
-    overview.append("g").call(brush);
-  }
+        .attr("opacity", 0.7);
+    }
+  });
 
   // =========================
-  // 2) DETAIL PANEL (linked to Panel 1 selection)
+  // 2) DETAIL PANEL — NVIDIA ONLY (Adjusted Close)
   // =========================
-  const detail = d3.select("#detail")
-    .attr("viewBox", `0 0 ${width} ${height}`);
+ const detail = d3.select("#detail")
+  .attr("viewBox", `0 0 ${width} ${height}`);
 
-  function updateDetail([x0, x1]) {
-    detail.selectAll("*").remove();
+function updateDetail([x0, x1]) {
+  detail.selectAll("*").remove();
 
+  detail.append("text")
+    .attr("x", width / 2)
+    .attr("y", 16)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 12)
+    .attr("font-weight", "600")
+    .text("NVIDIA Detailed View");
+
+  const xDetail = x.copy().domain([x0, x1]);
+  const filteredNvda = nvidiaData.filter(d => d.date >= x0 && d.date <= x1);
+
+  if (filteredNvda.length === 0) {
     detail.append("text")
-      .attr("x", width / 2)
-      .attr("y", 16)
-      .attr("text-anchor", "middle")
+      .attr("x", margin.left)
+      .attr("y", margin.top + 30)
       .attr("font-size", 12)
-      .attr("font-weight", "600")
-      .text("Detailed View (Linked to Selection)");
-
-    const xDetail = x.copy().domain([x0, x1]);
-    const filtered = data.filter(d => d.date >= x0 && d.date <= x1);
-
-    const yDetail = d3.scaleLinear()
-      .domain(d3.extent(filtered.filter(d => visibleTickers.includes(d.ticker)), d => d.price))
-      .nice()
-      .range([height - margin.bottom, margin.top]);
-
-    const lineDetail = d3.line()
-      .x(d => xDetail(d.date))
-      .y(d => yDetail(d.price));
-
-    // Axes
-    detail.append("g")
-      .attr("transform", `translate(0,${height - margin.bottom})`)
-      .call(d3.axisBottom(xDetail));
-
-    detail.append("g")
-      .attr("transform", `translate(${margin.left},0)`)
-      .call(d3.axisLeft(yDetail));
-
-    // Axis labels
-    detail.append("text")
-      .attr("x", width / 2)
-      .attr("y", height - 8)
-      .attr("text-anchor", "middle")
-      .attr("font-size", 11)
-      .text("Year");
-
-    detail.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("x", -height / 2)
-      .attr("y", 15)
-      .attr("text-anchor", "middle")
-      .attr("font-size", 11)
-      .text("Adjusted Close Price (USD)");
-
-    // Lines (ONLY visibleTickers)
-    visibleTickers.forEach(t => {
-      detail.append("path")
-        .datum(filtered.filter(d => d.ticker === t))
-        .attr("fill", "none")
-        .attr("stroke", colors[t] || "#444")
-        .attr("stroke-width", 2)
-        .attr("opacity", 0.9)
-        .attr("d", lineDetail);
-    });
-
-    addLegend(detail, visibleTickers, width - 150, margin.top + 8);
+      .text("No NVIDIA data in this selected range.");
+    return;
   }
 
+  // --- Scales ---
+  const yPrice = d3.scaleLinear()
+    .domain(d3.extent(filteredNvda, d => d.close))
+    .nice()
+    .range([height - margin.bottom, margin.top]);
+
+  const hasVolume = filteredNvda.some(d => !isNaN(d.volume));
+  const yVol = d3.scaleLinear()
+    .domain(
+      hasVolume
+        ? d3.extent(filteredNvda.filter(d => !isNaN(d.volume)), d => d.volume)
+        : [0, 1]
+    )
+    .nice()
+    .range([height - margin.bottom, height / 2]);
+
+  const linePrice = d3.line()
+    .x(d => xDetail(d.date))
+    .y(d => yPrice(d.close));
+
+  // --- Axes ---
+  detail.append("g")
+    .attr("transform", `translate(0,${height - margin.bottom})`)
+    .call(d3.axisBottom(xDetail));
+
+  detail.append("g")
+    .attr("transform", `translate(${margin.left},0)`)
+    .call(d3.axisLeft(yPrice));
+
+  detail.append("g")
+    .attr("transform", `translate(${width - margin.right},0)`)
+    .call(
+       d3.axisRight(yVol)
+      .ticks(2)
+      .tickFormat(d3.format(".2s"))
+      .tickPadding(8)   // <-- key fix
+  );
+
+
+  // --- Axis labels ---
+  detail.append("text")
+    .attr("x", width / 2)
+    .attr("y", height - 8)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .text("Year");
+
+  detail.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -height / 2)
+    .attr("y", 15)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .text("Close Price (USD)");
+
+  detail.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -height / 2)
+    .attr("y", width + 32)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .text("Volume");
+
+  // --- Volume bars (draw first so price line is on top) ---
+  if (hasVolume) {
+    const barW = Math.max(
+      1,
+      (xDetail(filteredNvda[Math.min(1, filteredNvda.length - 1)].date) - xDetail(filteredNvda[0].date)) * 0.9
+    );
+
+    detail.append("g")
+      .selectAll("rect")
+      .data(filteredNvda.filter(d => !isNaN(d.volume)))
+      .enter()
+      .append("rect")
+      .attr("x", d => xDetail(d.date) - barW / 2)
+      .attr("y", d => yVol(d.volume))
+      .attr("width", barW)
+      .attr("height", d => height - margin.bottom - yVol(d.volume))
+      .attr("fill", "#bbb")
+      .attr("opacity", 0.9);
+  }
+
+  // --- Split markers (blue dashed) ---
+  NVIDIA_SPLITS.forEach(sd => {
+    const [d0, d1] = xDetail.domain();
+    if (sd >= d0 && sd <= d1) {
+      detail.append("line")
+        .attr("x1", xDetail(sd))
+        .attr("x2", xDetail(sd))
+        .attr("y1", margin.top)
+        .attr("y2", height - margin.bottom)
+        .attr("stroke", "blue")
+        .attr("stroke-dasharray", "4,4")
+        .attr("stroke-width", 1.5)
+        .attr("opacity", 0.35);
+    }
+  });
+
+  // --- Close price line ---
+  detail.append("path")
+    .datum(filteredNvda)
+    .attr("fill", "none")
+    .attr("stroke", colors.NVIDIA)
+    .attr("stroke-width", 2)
+    .attr("opacity", 0.95)
+    .attr("d", linePrice);
+
+ // addLegend(detail, ["NVIDIA"], width - 150, margin.top + 8);
+}
+
   // =========================
-  // 3) MODEL PANEL (Actual vs Fitted) — Panel 3
+  // 3) MODEL PANEL
   // =========================
   const modelData = rawModel.map(d => ({
     date: parseDate(d.date),
@@ -236,6 +374,18 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
     d.date instanceof Date && !isNaN(d.date) &&
     !isNaN(d.actual) && !isNaN(d.fitted)
   );
+
+  // =========================
+// Fixed domains (no brushing)
+// =========================
+
+// Panel 3: fixed to AI era (2016 → latest model date)
+const modelMaxDate = d3.max(modelData, d => d.date);
+const modelDomainFixed = [MODEL_START_DATE, modelMaxDate];
+
+// Panel 4: fixed to full dataset range
+const scatterDomainFixed = x.domain();
+
 
   const modelW = width;
   const modelH = 360;
@@ -276,7 +426,7 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
       .attr("text-anchor", "middle")
       .attr("font-size", 12)
       .attr("font-weight", "600")
-      .text("Adjusted Close (Actual vs Fitted) — Selection");
+      .text("Stock Price Regression: Actual Prices vs. Model Fits");
 
     modelSvg.append("g")
       .attr("transform", `translate(0,${modelH - margin.bottom})`)
@@ -299,9 +449,50 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
       .attr("y", 15)
       .attr("text-anchor", "middle")
       .attr("font-size", 11)
-      .text("Adjusted Close Price (USD)");
+      .text("Close Price (USD)");
 
     const byT = d3.group(filtered, d => d.ticker);
+
+    // R^2 box
+    const r2ByTicker = new Map();
+    for (const [tkr, series] of byT.entries()) {
+      const s = series.slice().sort((a, b) => a.date - b.date);
+      const actuals = s.map(d => d.actual);
+      const fits = s.map(d => d.fitted);
+      r2ByTicker.set(tkr, rSquared(actuals, fits));
+    }
+
+    const r2Lines = selectedTickers.map(t => {
+      const v = r2ByTicker.get(t);
+      const txt = (v == null || isNaN(v)) ? "R²: n/a" : `R² = ${v.toFixed(3)}`;
+      return `${t}: ${txt}`;
+    });
+
+    const boxX = margin.left + 15;
+    const boxY = margin.top + 32;
+    const boxW = 140;
+    const boxH = 16 * r2Lines.length + 6;
+
+    modelSvg.append("rect")
+      .attr("x", boxX - 5)
+      .attr("y", boxY - 14)
+      .attr("width", boxW)
+      .attr("height", boxH)
+      .attr("fill", "white")
+      .attr("opacity", 0.95)
+      .attr("stroke", "#ddd");
+
+    modelSvg.append("g")
+      .selectAll("text.r2line")
+      .data(r2Lines)
+      .enter()
+      .append("text")
+      .attr("class", "r2line")
+      .attr("x", boxX)
+      .attr("y", (d, i) => boxY + i * 16)
+      .attr("font-size", 12)
+      .attr("fill", "#111")
+      .text(d => d);
 
     const lineActual = d3.line()
       .x(d => xM(d.date))
@@ -356,11 +547,11 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
       return;
     }
     mWarn.textContent = "";
-    updateModelPlot(currentDomain, sel);
+    updateModelPlot(modelDomainFixed, sel);
   });
 
   // =========================
-  // 4) SCATTER PANEL (Panel 4)
+  // 4) SCATTER PANEL (uses ADJ prices)
   // =========================
   const scatterW = width;
   const scatterH = 320;
@@ -377,8 +568,8 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
     const byDate = d3.rollup(
       filtered,
       v => ({
-        xVal: v.find(d => d.ticker === xTicker)?.price,
-        yVal: v.find(d => d.ticker === yTicker)?.price
+        xVal: v.find(d => d.ticker === xTicker)?.adj,
+        yVal: v.find(d => d.ticker === yTicker)?.adj
       }),
       d => +d.date
     );
@@ -428,7 +619,7 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
       .attr("cx", d => xScale(d.xVal))
       .attr("cy", d => yScale(d.yVal))
       .attr("r", 3)
-      .attr("fill", "steelblue")
+      .attr("fill", "#0072B2")
       .attr("opacity", 0.6);
 
     const xMin = d3.min(xs);
@@ -441,15 +632,15 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
       .attr("y1", yScale(yMin))
       .attr("x2", xScale(xMax))
       .attr("y2", yScale(yMax))
-      .attr("stroke", "red")
-      .attr("stroke-width", 2);
+      .attr("stroke", "#D55E00")
+      .attr("stroke-width", 3);
 
     scatterSvg.append("text")
       .attr("x", scatterW / 2)
       .attr("y", scatterH - 8)
       .attr("text-anchor", "middle")
       .attr("font-size", 11)
-      .text(`${xTicker} Price (USD)`);
+      .text(`${xTicker} Adjusted Close (USD)`);
 
     scatterSvg.append("text")
       .attr("transform", "rotate(-90)")
@@ -457,7 +648,7 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
       .attr("y", 15)
       .attr("text-anchor", "middle")
       .attr("font-size", 11)
-      .text(`${yTicker} Price (USD)`);
+      .text(`${yTicker} Adjusted Close (USD)`);
 
     const label = `Correlation = ${corr.toFixed(3)}`;
     scatterSvg.append("rect")
@@ -479,14 +670,19 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
   // =========================
   // Brush handler (links Panel 2, 3, 4)
   // =========================
-  function brushed(event) {
-    if (!event.selection) return;
-    currentDomain = event.selection.map(x.invert);
+function brushed(event) {
+  if (!event.selection) return;
+  currentDomain = event.selection.map(x.invert);
 
-    updateDetail(currentDomain);
-    updateScatter(currentDomain, selectedPair);
-    updateModelPlot(currentDomain, getModelChecked());
-  }
+  // Brush affects ONLY Panel 2
+  updateDetail(currentDomain);
+}
+
+  const brush = d3.brushX()
+    .extent([[margin.left, margin.top], [width - margin.right, height - margin.bottom]])
+    .on("brush end", brushed);
+
+  overview.append("g").call(brush);
 
   // =========================
   // Panel 4 controls (exactly 2 stocks)
@@ -526,45 +722,13 @@ Promise.all([d3.csv("data.csv"), d3.csv("data_model.csv")]).then(([raw, rawModel
     }
     warn.textContent = "";
     selectedPair = now;
-    updateScatter(currentDomain, selectedPair);
-  });
-
-  // =========================
-  // Panel 1 controls (NEW): show/hide lines + refresh -> affects Panel 2
-  // =========================
-  const oAmd = document.getElementById("o-amd");
-  const oIntel = document.getElementById("o-intel");
-  const oNvidia = document.getElementById("o-nvidia");
-  const oRefresh = document.getElementById("o-refresh");
-  const oWarn = document.getElementById("o-warning");
-
-  function getOverviewChecked() {
-    const out = [];
-    if (oAmd?.checked) out.push("AMD");
-    if (oIntel?.checked) out.push("INTEL");
-    if (oNvidia?.checked) out.push("NVIDIA");
-    return out;
-  }
-
-  oRefresh?.addEventListener("click", () => {
-    const sel = getOverviewChecked();
-    if (sel.length === 0) {
-      oWarn.textContent = "Select at least one stock.";
-      return;
-    }
-    oWarn.textContent = "";
-    visibleTickers = sel;
-
-    // redraw Panel 1 + Panel 2 with same brush domain
-    drawOverview();
-    updateDetail(currentDomain);
+    updateScatter(scatterDomainFixed, selectedPair);
   });
 
   // =========================
   // Initialize
   // =========================
-  drawOverview();                               // Panel 1
-  updateDetail(x.domain());                      // Panel 2
-  updateModelPlot(x.domain(), getModelChecked()); // Panel 3 (starts 2016 inside)
-  updateScatter(x.domain(), selectedPair);        // Panel 4
+  updateDetail(x.domain());
+  updateModelPlot(modelDomainFixed, getModelChecked());
+  updateScatter(scatterDomainFixed, selectedPair);
 });
