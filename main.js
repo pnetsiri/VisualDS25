@@ -1,5 +1,5 @@
 const colors = {
-  AMD: "#CC79A7",
+  AMD: "#009E73",
   INTEL: "#0072B2",
   NVIDIA: "#D55E00"
 };
